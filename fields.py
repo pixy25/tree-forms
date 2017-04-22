@@ -1,30 +1,28 @@
 from collections import defaultdict
+from functools import partial
 
+from validators import Required, ChoiceValidator, TypeValidator, ConversionValidator, validate_path
 from utils.time import unserialize_time
 
 
-def dict_to_value_paths(mapping):
-    result = []
-
-    def _helper(dct, base_path):
-        for path, value in dct.items():
-            if not isinstance(value, dict):
-                result.append((base_path + [path], value))
-            else:
-                _helper(value, base_path + [path])
-
-    _helper(mapping, [])
-    return result
-
-
+filter_out_empty = partial(filter, lambda _: _)
 
 
 class BaseField(object):
+    validators = []
+
+    def copy(self):
+        copy = self.__class__()
+        copy._validators = self._validators
 
     def add_validators(self, *validators):
-        if not hasattr(self, '_validators'):
-            self._validators = []
         self._validators.extend(validators)
+
+    def __new__(cls, *args, **kwargs):
+        self = super(BaseField, cls).__new__(*args, **kwargs)
+        if not hasattr(self, '_validators'):
+            self._validators = cls.validators[:]
+        return self
 
     def __init__(self, validators=None):
         if validators:
@@ -32,8 +30,8 @@ class BaseField(object):
         else:
             self.add_validators()
 
-    def __call__(self, form, data, name):
-        self.form, self.data, self.name = form, data, name
+    def __call__(self, data, form, name):
+        self.form, self.data, self.name = data, form, name
         return self
 
     def validate(self):
@@ -52,7 +50,7 @@ class BaseField(object):
     def run_validators(self, validators):
         errors = []
         for validator in validators:
-            error = validator(self.form, self.data, self.name)
+            error = validator(self.data, self.form, self.name)
             if error:
                 errors.append(error)
         return errors
@@ -61,7 +59,7 @@ class BaseField(object):
 class FormField(BaseField):
     def __init__(self, FormClass, *args, **kwargs):
 
-        def validate(form, data, field_name):
+        def validate(data, form, field_name):
             inner_form = FormClass(data)
             if not inner_form.validate():
                 return inner_form.errors
@@ -70,16 +68,26 @@ class FormField(BaseField):
         super(FormField, self).__init__(*args, **kwargs)
 
 
+def field_callable(field_instance):
+    if not isinstance(field_instance, BaseField):
+        field_instance = field_instance() # for recursive forms
+    return field_instance
+
+
 class FieldList(BaseField):
     def __init__(self, field_obj, *args, **kwargs):
 
-        def validate(form, data, field_name):
-            field_clbl = field_obj
-            if not isinstance(field_obj, BaseField):
-                field_clbl = field_clbl()  # for recursive forms
-            errors = [field_clbl(form, field_data, field_name).validate() for field_data in data]
-            filtered_errors = filter(lambda _:_, errors)
-            return errors if filtered_errors else None
+        def validate(data, form, field_name):
+            errors = [
+                field_callable(field_obj)(
+                    form,
+                    field_data,
+                    field_name
+                ).validate()
+                for field_data in data
+            ]
+            if filter_out_empty(errors):
+                return errors
 
         self.add_validators(validate)
         super(FieldList, self).__init__(*args, **kwargs)
@@ -87,11 +95,9 @@ class FieldList(BaseField):
 
 class BaseFieldDict(BaseField):
     def __init__(self, field_obj, keys_validator=None, *args, **kwargs):
-        def validate(form, data, field_name):
-            field_clbl = field_obj
-            if not isinstance(field_obj, BaseField):
-                field_clbl = field_clbl()  # for recursive forms
-            key_errors = keys_validator(form, data.keys(), field_name) if keys_validator else {}
+        def validate(data, form, field_name):
+            field_clbl = field_callable(field_obj)
+            key_errors = keys_validator(data, form.keys(), field_name) if keys_validator else {}
             result = defaultdict(list, key_errors)
             for key, field_data in data.items():
                 errors = field_clbl(form, field_data, key).validate()
@@ -108,69 +114,16 @@ class BaseFieldDict(BaseField):
 
 class BaseFieldTuple(BaseField):
     def __init__(self, field_objects, *args, **kwargs):
-        def validate(form, data, field_name):
-            field_clbls = field_objects
-            field_clbls = [field_clbl() if not isinstance(field_clbl, BaseField) else field_clbl for field_clbl in field_clbls]
+        def validate(data, form, field_name):
             errors = [
-                field_clbl(form, field_data, field_name).validate()
-                for field_clbl, field_data in zip(field_clbls, data)
+                field_callable(field_obj)(form, field_data, field_name).validate()
+                for field_obj, field_data in zip(field_objects, data)
             ]
             filtered_errors = filter(lambda _: _, errors)
             return errors if filtered_errors else None
 
         self.add_validators(validate)
         super(BaseFieldTuple, self).__init__(*args, **kwargs)
-
-
-
-def validate_path(form, path, field):
-    if not all(isinstance(elem, str) for elem in path):
-        return "Path must be list of strings"
-
-
-class Required(object):
-    def __call__(self, form, data, field):
-        if not data:
-            return "Field %s required" % field
-
-
-class RequiredIf(Required):
-    def __init__(self, clause):
-        self.clause = clause
-
-    def __call__(self, form, data, field):
-        if self.clause(form) and not data:
-            return "Field %s required" % field
-
-
-class NumRange(object):
-    def __init__(self, min=None, max=None):
-        self.min = min
-        self.max = max
-
-    def __call__(self, form, data, field):
-        if self.min and data < self.min:
-            return 'Must be at least %d' % self.min
-        if self.max and data > self.max:
-            return 'Must be less then %d' % self.max
-
-
-class ChoiceValidator(object):
-    def __init__(self, collection):
-        self.collection = collection
-
-    def __call__(self, form, data, field):
-        if data not in self.collection:
-            return 'Should be one of %s' % ', '.join(self.collection)
-
-
-class TypeValidator(object):
-    def __init__(self, type, msg=None):
-        self.type = type
-        self.msg=msg
-
-    def __call__(self, form, elem, field):
-        return not isinstance(elem, self.type) and (self.msg or 'Must be %s' % (self.type.__name__,))
 
 
 class ChoiceField(BaseField):
@@ -180,64 +133,32 @@ class ChoiceField(BaseField):
 
 
 class StringField(BaseField):
-    def __init__(self, *args, **kwargs):
-        self.add_validators(lambda f, s, n: (not isinstance(s, str)) and "Must be string")
-        super(StringField, self).__init__(*args, **kwargs)
+    validators = [TypeValidator(str)]
 
 
 class DateTimeField(BaseField):
-    def __init__(self, *args, **kwargs):
-
-        def validator(form, dt, field):
-            try:
-                unserialize_time(dt)
-                return
-            except TypeError:
-                return 'Expected date time string, got %s' % str(dt)
-
-        self.add_validators(validator)
-        super(DateTimeField, self).__init__(*args, **kwargs)
+    validators = [
+        ConversionValidator(unserialize_time, 'Expected date time string')
+    ]
 
 
 class IntField(BaseField):
-    def __init__(self, *args, **kwargs):
-        self.add_validators(TypeValidator(int))
-        super(IntField, self).__init__(*args, **kwargs)
+    validators = [TypeValidator(int)]
 
 
 class FloatField(BaseField):
-    def __init__(self, *args, **kwargs):
-        def validate(form, elem, field):
-            try:
-                float(elem)
-            except ValueError:
-                return 'Must be decimal'
-        self.add_validators(validate)
-        super(FloatField, self).__init__(*args, **kwargs)
+    validators = [ConversionValidator(float, 'Must be decimal', ValueError)]
 
 
 class StringListField(BaseField):
-    def __init__(self, *args, **kwargs):
-        self.add_validators(validate_path)
-        super(StringListField, self).__init__(*args, **kwargs)
+    validators = [validate_path]
 
 
 class BooleanField(BaseField):
-    def __init__(self, *args, **kwargs):
-        self.add_validators(TypeValidator(bool))
-        super(BooleanField, self).__init__(*args, **kwargs)
+    validators = [TypeValidator(bool)]
 
 
 class PathsField(BaseField):
-    def __init__(self, *args, **kwargs):
-
-        def validator(form, paths, field):
-            errors = []
-            for path in paths:
-                error = validate_path(form, path, field)
-                if error:
-                    errors.append(error)
-            return errors or None
-
-        self.add_validators(validator)
-        super(PathsField, self).__init__(*args, **kwargs)
+    validators = [
+        lambda paths, f, n: filter(lambda _:_, map(validate_path, paths)) or None
+    ]
