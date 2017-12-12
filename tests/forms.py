@@ -18,14 +18,11 @@ class BaseForm(object):
         self._data = data
         self._structure = {}
         self._validated = False
-        self._clean_data()
+        to_delete = [field for field in self._data if field not in self._fields]
+        for field in to_delete:
+            del self._data[field]
         for field_name, field in self._fields.items():
             self._structure[field_name] = field(self, self.get(field_name), field_name)
-
-    def _clean_data(self):
-        for field in self._data:
-            if field not in self._fields:
-                del self._data[field]
 
     def validate(self):
         self.errors = {}
