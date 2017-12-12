@@ -8,6 +8,7 @@ class BaseField(object):
     def copy(self):
         copy = self.__class__()
         copy._validators = self._validators
+        return copy
 
     def add_validators(self, *validators):
         self._validators.extend(validators)
@@ -25,14 +26,15 @@ class BaseField(object):
             self.add_validators()
 
     def __call__(self, data, form, name):
-        self.form, self.data, self.name = data, form, name
-        return self
+        new = self.copy()
+        new.form, new.data, new.name = data, form, name
+        return new
 
     def validate(self):
         errors = []
         for validator in self._validators:
             try:
-                validator(self.data, self.form, self.name)
+                validator(self.data, self.form)
             except ValidationError as ve:
                 errors.append(ve.data)
         return errors
