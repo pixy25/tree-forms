@@ -1,59 +1,41 @@
-__all__ = []
+import unittest
+from hypothesis import given
+from hypothesis import strategies as st
 
-def validate_path(path, form=None, field=None):
-    if not all(isinstance(elem, str) for elem in path):
-        return "Path must be list of strings"
-
-
-class Required(object):
-    def __call__(self, data, form, field):
-        if not data:
-            return "Field %s required" % field
+from validators import ValidationError, Required, RequiredIf, NumRange, ChoiceValidator, \
+    FieldSequenceValidator, FieldDictValidator
 
 
-class RequiredIf(Required):
-    def __init__(self, clause):
-        self.clause = clause
+class TestRequired(unittest.TestCase):
 
-    def __call__(self, data, form, field):
-        if self.clause(form) and not data:
-            return "Field %s required" % field
+    def test_fails_on_empty(self):
+        for empty_val in ('', {}, [], None):
+            with self.assertRaises(ValidationError) as context:
+                Required()(empty_val, form=None)
+            self.assertEqual(context.exception.data, "Field is required")
 
-
-class NumRange(object):
-    def __init__(self, min=None, max=None):
-        self.min = min
-        self.max = max
-
-    def __call__(self, data, form, field):
-        if self.min and data < self.min:
-            return 'Must be at least %d' % self.min
-        if self.max and data > self.max:
-            return 'Must be less then %d' % self.max
+    def test_ok_on_non_empty(self):
+        for val in (0, 1, -1, {'': ''}, [''], [None]):
+            self.assertIsNone(Required()(val, form=None))
 
 
-class ChoiceValidator(object):
-    def __init__(self, collection):
-        self.collection = collection
-
-    def __call__(self, data, form, field):
-        if data not in self.collection:
-            return 'Should be one of %s' % ', '.join(self.collection)
+class TestRequiredIf(unittest.TestCase):
 
 
-class TypeValidator(object):
-    def __init__(self, type, msg=None):
-        self.type = type
-        self.msg=msg
+    def test_ok_on_non_empty(self):
+        for val in (0, 1, -1, {'': ''}, [''], [None]):
+            self.assertIsNone(RequiredIf(lambda _: True)(val, form=None))
 
-    def __call__(self, elem, form, field):
-        return not isinstance(elem, self.type) and (self.msg or 'Must be %s' % (self.type.__name__,))
+    def test_ok_on_empty_when_clause_is_false(self):
+        for empty_val in ('', {}, [], None):
+            RequiredIf(lambda _: False)(empty_val, form=None)
+
+    def test_fails_on_empty_when_clause_is_true(self):
+        for empty_val in ('', {}, [], None):
+            with self.assertRaises(ValidationError) as context:
+                RequiredIf(lambda _: True)(empty_val, form=None)
+            self.assertEqual(context.exception.data, "Field is required")
 
 
-def ConversionValidator(con, error_message, error_class=TypeError):
-    def validator(f, data, n):
-        try:
-            con(data)
-        except error_class:
-            return error_message
-    return validator
+if __name__ == '__main__':
+    unittest.main()

@@ -8,18 +8,18 @@ class ValidationError(Exception):
 
 
 class Required:
-    def __call__(self, data, form, field):
-        if not data:
-            raise ValidationError("Field %s required" % field)
+    def __call__(self, data, form):
+        if data in ('', {}, [], None):
+            raise ValidationError("Field is required")
 
 
 class RequiredIf(Required):
     def __init__(self, clause):
         self.clause = clause
 
-    def __call__(self, data, form, field):
-        if self.clause(form) and not data:
-            raise ValidationError("Field %s required" % field)
+    def __call__(self, data, form):
+        if self.clause(form):
+            super().__call__(data, form)
 
 
 class NumRange:
@@ -27,7 +27,7 @@ class NumRange:
         self.min = min
         self.max = max
 
-    def __call__(self, data, form, field):
+    def __call__(self, data, form):
         if self.min and data < self.min:
             raise ValidationError('Must be at least %d' % self.min)
         if self.max and data > self.max:
@@ -38,7 +38,7 @@ class ChoiceValidator:
     def __init__(self, collection):
         self.collection = collection
 
-    def __call__(self, data, form, field):
+    def __call__(self, data, form):
         if data not in self.collection:
             raise ValidationError('Should be one of %s' % ', '.join(self.collection))
 
@@ -48,7 +48,7 @@ class BaseFieldCollectionValidator:
     def __init__(self, field):
         self.field_obj = field
 
-    def _validate(self, data, form, field):
+    def _validate(self, data, form):
         for key, field_data in data:
             errors = self.field_obj(form, field_data, key).validate()
             if errors:
@@ -56,7 +56,7 @@ class BaseFieldCollectionValidator:
 
 
 class FieldSequenceValidator(BaseFieldCollectionValidator):
-    def __call__(self,  data, form, field):
+    def __call__(self,  data, form):
         errors = []
         for _, field_errors in self._validate(enumerate(data), form, field):
             if field_errors:
@@ -71,7 +71,7 @@ class FieldDictValidator(BaseFieldCollectionValidator):
         super().__init__(field)
         self.key_validator = key_validator
 
-    def __call__(self, data, form, field):
+    def __call__(self, data, form):
         from collections import defaultdict
         result = defaultdict(list)
         for key, field_errors in self._validate(data.items(), form, field):
