@@ -1,4 +1,7 @@
-from fields import BaseField
+from fields import Field
+
+
+__all__ = ['BaseForm']
 
 
 class FormMeta(type):
@@ -6,7 +9,7 @@ class FormMeta(type):
         namespace['_fields'] = property(lambda self: {
             key: value.copy()
             for key, value in namespace.items()
-            if isinstance(value, BaseField)
+            if isinstance(value, Field)
         })
 
         super(FormMeta, mcls).__new__(name, bases, namespace)
@@ -14,13 +17,11 @@ class FormMeta(type):
 
 class BaseForm(object):
 
-    def __init__(self, data):
+    def __init__(self, data: dict):
         self._data = data
-        self._structure = {}
         self._validated = False
         self._clean_data()
-        for field_name, field in self._fields.items():
-            self._structure[field_name] = field(self, self.get(field_name), field_name)
+        self.errors = {}
 
     def _clean_data(self):
         for field in self._data:
@@ -28,11 +29,10 @@ class BaseForm(object):
                 del self._data[field]
 
     def validate(self):
-        self.errors = {}
-        for key, val in self._structure.items():
-            error_structure = val.validate()
-            if error_structure:
-                self.errors[key] = error_structure
+        for field_name, field in self._fields.items():
+            field_errors = field.validate(self, self.get(field_name))
+            if field_errors:
+                self.errors[field_name] = field_errors
         if self.errors:
             return False
         self._validated = True

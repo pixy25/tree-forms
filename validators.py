@@ -1,10 +1,20 @@
-__all__ = []
+from collections import defaultdict
 
 
 class ValidationError(Exception):
     def __init__(self, data, *args):
         self.data = data
         super().__init__(*args)
+
+
+class TypeValidator:
+    def __init__(self, expected_type, error_msg):
+        self.expected_type = expected_type
+        self.error_msg = error_msg
+
+    def __call__(self, data, form):
+        if not isinstance(data, self.expected_type):
+            raise ValidationError(self.error_msg)
 
 
 class Required:
@@ -58,7 +68,7 @@ class BaseFieldCollectionValidator:
 class FieldSequenceValidator(BaseFieldCollectionValidator):
     def __call__(self,  data, form):
         errors = []
-        for _, field_errors in self._validate(enumerate(data), form, field):
+        for _, field_errors in self._validate(enumerate(data), form):
             if field_errors:
                 errors.extend(field_errors)
         if errors:
@@ -72,9 +82,8 @@ class FieldDictValidator(BaseFieldCollectionValidator):
         self.key_validator = key_validator
 
     def __call__(self, data, form):
-        from collections import defaultdict
         result = defaultdict(list)
-        for key, field_errors in self._validate(data.items(), form, field):
+        for key, field_errors in self._validate(data.items(), form):
             if field_errors:
                 result[key].extend(field_errors)
             if self.key_validator:

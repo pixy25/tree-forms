@@ -1,8 +1,8 @@
 from collections import defaultdict
-from validators import ChoiceValidator, FieldSequenceValidator, FieldDictValidator, ValidationError
+from validators import ChoiceValidator, FieldSequenceValidator, FieldDictValidator, ValidationError, TypeValidator
 
 
-class BaseField(object):
+class Field(object):
     validators = []
 
     def copy(self):
@@ -13,40 +13,39 @@ class BaseField(object):
     def add_validators(self, *validators):
         self._validators.extend(validators)
 
-    def __new__(cls, *args, **kwargs):
-        self = super(BaseField, cls).__new__(*args, **kwargs)
-        if not hasattr(self, '_validators'):
-            self._validators = cls.validators[:]
-        return self
-
     def __init__(self, validators=None):
+        if not hasattr(self, '_validators'):
+            self._validators = self.validators[:]
         if validators:
             self.add_validators(*validators)
         else:
             self.add_validators()
 
-    def __call__(self, data, form, name):
-        new = self.copy()
-        new.form, new.data, new.name = data, form, name
-        return new
-
-    def validate(self):
+    def validate(self, data, form):
         errors = []
         for validator in self._validators:
             try:
-                validator(self.data, self.form)
+                validator(data, form)
             except ValidationError as ve:
                 errors.append(ve.data)
         return errors
 
 
-class FormField(BaseField):
-    def __init__(self, FormClass, *args, **kwargs):
-        if isinstance(FormClass, str):
-            FormClass = self._form_class_from_name(FormClass)
+class TextField(Field):
+    validators = [TypeValidator(str, 'Should be string')]
 
-        def validate(data, form, field_name):
-            inner_form = FormClass(data)
+
+class IntField(Field):
+    validators = [TypeValidator(int, 'Should be integer')]
+
+
+class FormField(Field):
+    def __init__(self, form_class, *args, **kwargs):
+        if isinstance(form_class, str):
+            form_class = self._form_class_from_name(form_class)
+
+        def validate(data, form):
+            inner_form = form_class(data)
             if not inner_form.validate():
                 raise ValidationError(inner_form.errors)
 
@@ -61,19 +60,19 @@ class FormField(BaseField):
         raise AttributeError('Form named %s is not defined' % cls_name)
 
 
-class FieldList(BaseField):
+class FieldList(Field):
     def __init__(self, field, *args, **kwargs):
         self.add_validators(FieldSequenceValidator(field))
         super().__init__(*args, **kwargs)
 
 
-class FieldDict(BaseField):
+class FieldDict(Field):
     def __init__(self, field, keys_validator=None, *args, **kwargs):
         self.add_validators(FieldDictValidator(field, keys_validator))
         super().__init__(*args, **kwargs)
 
 
-class ChoiceField(BaseField):
+class ChoiceField(Field):
     def __init__(self, collection, *args, **kwargs):
         self.add_validators(ChoiceValidator(collection))
         super().__init__(*args, **kwargs)

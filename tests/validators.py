@@ -2,8 +2,7 @@ import unittest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from validators import ValidationError, Required, RequiredIf, NumRange, ChoiceValidator, \
-    FieldSequenceValidator, FieldDictValidator
+from validators import ValidationError, Required, RequiredIf, FieldSequenceValidator, FieldDictValidator
 
 
 class TestRequired(unittest.TestCase):
@@ -21,7 +20,6 @@ class TestRequired(unittest.TestCase):
 
 class TestRequiredIf(unittest.TestCase):
 
-
     def test_ok_on_non_empty(self):
         for val in (0, 1, -1, {'': ''}, [''], [None]):
             self.assertIsNone(RequiredIf(lambda _: True)(val, form=None))
@@ -35,6 +33,13 @@ class TestRequiredIf(unittest.TestCase):
             with self.assertRaises(ValidationError) as context:
                 RequiredIf(lambda _: True)(empty_val, form=None)
             self.assertEqual(context.exception.data, "Field is required")
+
+
+class TestFieldSequenceValidator(unittest.TestCase):
+
+    def test_ok(self):
+        pass
+
 
 
 if __name__ == '__main__':
