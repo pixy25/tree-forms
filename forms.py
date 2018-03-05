@@ -1,36 +1,27 @@
 from fields import Field
+from utils import set_current_form, rollback_current_form
 
 
-__all__ = ['BaseForm']
+class BaseForm:
 
-
-class FormMeta(type):
-    def __new__(mcls, name, bases, namespace):
-        namespace['_fields'] = property(lambda self: {
-            key: value.copy()
-            for key, value in namespace.items()
-            if isinstance(value, Field)
-        })
-
-        super(FormMeta, mcls).__new__(name, bases, namespace)
-
-
-class BaseForm(object):
-
-    def __init__(self, data: dict):
+    def __init__(self, data):
+        set_current_form(self)
+        self.fields = {
+            key: field
+            for key, field in (self.__dict__).items()
+            if isinstance(field, Field)
+        }
         self._data = data
         self._validated = False
-        self._clean_data()
         self.errors = {}
 
-    def _clean_data(self):
-        for field in self._data:
-            if field not in self._fields:
-                del self._data[field]
+    def __del__(self):
+        rollback_current_form()
+
 
     def validate(self):
-        for field_name, field in self._fields.items():
-            field_errors = field.validate(self, self.get(field_name))
+        for field_name, field in self.fields.items():
+            field_errors = field.validate(self.get(field_name))
             if field_errors:
                 self.errors[field_name] = field_errors
         if self.errors:
